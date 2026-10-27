@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run main.c",
+      "name": "Run compress",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceRoot}/code/compiled/main",
@@ -19,7 +19,35 @@
           "ignoreFailures": true
         }
       ],
-      "preLaunchTask": "Compile main.c"
+      "preLaunchTask": "Compile main.c",
+      "args": [
+        "compress",
+        "${workspaceRoot}/data/entrada.txt"
+      ]
+    },
+    {
+      "name": "Run decompress",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceRoot}/code/compiled/main",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "Compile main.c",
+      "args": [
+        "decompress",
+        "${workspaceRoot}/data/entrada.txt"
+      ]
     }
   ]
 }
