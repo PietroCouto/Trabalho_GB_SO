@@ -8,11 +8,11 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 
+#include "libs/utils.h"
+
 /**
  * Prototypes
  */
-
-int return_error(char *message);
 int start_compress(char *filename);
 int start_decompress(char *filename);
 
@@ -93,18 +93,6 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-
-/**
- * Prints an error message
- * @param message The message to be printed
- * @returns -1
- */
-int return_error(char *message)
-{
-    printf("%s\n", message);
-
-    return -1;
-};
 
 /**
  * Creates the compressing process
