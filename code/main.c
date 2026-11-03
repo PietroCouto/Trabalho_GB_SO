@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <stdbool.h>
 
 #include "libs/utils.h"
 
@@ -33,7 +34,7 @@ int main(int argc, char *argv[])
         return return_error("Argumentos em excesso!");
 
     // Check if a valid option was provided
-    if (!strcmp(argv[1], "compress") && !strcmp(argv[1], "decompress"))
+    if (strcmp(argv[1], "compress") != 0 && strcmp(argv[1], "decompress") != 0)
         return return_error("Opção inválida!");
 
     pid_t child_pid = -1;
@@ -71,7 +72,7 @@ int main(int argc, char *argv[])
     // Monitoring loop
     while (true)
     {
-        pid_t returned_pid = waitpid(child_pid, &status, 0);
+        pid_t returned_pid = waitpid(child_pid, &status, WNOHANG);
 
         if (returned_pid == -1)
             return_error("Erro ao executar o processo!");
