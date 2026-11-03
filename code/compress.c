@@ -141,7 +141,7 @@ void *reader(void *arg)
     while (fgets(line, LINE_LENGTH, file))
     {
         // Create the node to hold the data
-        struct node *element = malloc(sizeof(struct node));
+        struct node *element = calloc(1, sizeof(struct node));
 
         // Copy the line into the node
         strcpy(element->data, line);
@@ -204,7 +204,7 @@ void *compressor(void *arg)
         pthread_mutex_unlock(&reader_queue->mutex);
 
         // Create the node to hold the compressed data
-        struct node *compressed_element = malloc(sizeof(struct node));
+        struct node *compressed_element = calloc(1, sizeof(struct node));
 
         while (word != NULL)
         {
@@ -213,9 +213,9 @@ void *compressor(void *arg)
 
             if (sym_index >= 0)
             {
-                char *symbol = malloc(sizeof(SYM[sym_index]) + 1);
-
-                symbol = SYM[sym_index] + "\0";
+                char symbol[2];
+                symbol[0] = (char)sym_index;
+                symbol[1] = '\0';
 
                 // Copy the symbol into the node data
                 strcat(compressed_element->data, symbol);
