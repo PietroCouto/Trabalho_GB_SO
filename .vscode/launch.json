@@ -22,7 +22,8 @@
       "preLaunchTask": "Compile main.c",
       "args": [
         "compress",
-        "${workspaceRoot}/data/entrada.txt"
+        "${workspaceRoot}/data/entrada.txt",
+        "${workspaceRoot}/data/entrada_compactada.txt"
       ]
     },
     {

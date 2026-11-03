@@ -14,7 +14,7 @@
 /**
  * Prototypes
  */
-int start_compress(char *filename);
+int start_compress(char *input_path, char *output_path);
 int start_decompress(char *filename);
 
 /**
@@ -26,11 +26,11 @@ int start_decompress(char *filename);
 int main(int argc, char *argv[])
 {
     // Check if enough arguments were provided
-    if (argc < 3)
+    if (argc < 4)
         return return_error("Argumentos insuficientes!");
 
     // Check if to many arguments were provided
-    if (argc > 3)
+    if (argc > 4)
         return return_error("Argumentos em excesso!");
 
     // Check if a valid option was provided
@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
     if (strcmp(argv[1], "compress") == 0)
     {
         // Try to start the compressing process
-        child_pid = start_compress(argv[2]);
+        child_pid = start_compress(argv[2], argv[3]);
 
         // Check if the startup was successful
         if (child_pid == -1)
@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
  * @param filename The name of the file to be compressed
  * @returns -1 for error, PID for success
  */
-int start_compress(char *filename)
+int start_compress(char *input_path, char *output_path)
 {
     pid_t pid = fork();
 
@@ -111,12 +111,12 @@ int start_compress(char *filename)
     // Try to replace the child code
     if (pid == 0)
     {
-        char *argv[] = {"./compress", (char *)filename, NULL};
+        char *argv[] = {"./code/compiled/compress", (char *)input_path, (char *)output_path, NULL};
 
         char *envp[] = {NULL};
 
         // Replace the child process
-        execve("./compress", argv, envp);
+        execve("./code/compiled/compress", argv, envp);
 
         // Kill the child in case of execve failure
         _exit(EXIT_FAILURE);
@@ -141,12 +141,12 @@ int start_decompress(char *filename)
     // Try to replace the child code
     if (pid == 0)
     {
-        char *argv[] = {"./decompress", (char *)filename, NULL};
+        char *argv[] = {"./code/compiled/decompress", (char *)filename, NULL};
 
         char *envp[] = {NULL};
 
         // Replace the child process
-        execve("./decompress", argv, envp);
+        execve("./code/compiled/decompress", argv, envp);
 
         // Kill the child in case of execve failure
         _exit(EXIT_FAILURE);

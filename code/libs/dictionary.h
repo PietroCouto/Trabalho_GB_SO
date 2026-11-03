@@ -27,7 +27,7 @@ static const int DICTIONARY_SIZE = sizeof(SYM) / sizeof(SYM[0]);
 /**
  * Converts words to symbols
  * @param word Word to be translated
- * @returns -1 for error, SYM for success
+ * @returns -1 for no match, >= 0 for success
  */
 static int word_to_sym(const char *word)
 {

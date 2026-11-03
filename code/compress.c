@@ -8,6 +8,8 @@
 #include <sys/queue.h>
 #include <string.h>
 
+#include "libs/dictionary.h"
+
 #define LINE_LENGTH 1024
 
 /**
@@ -37,6 +39,18 @@ typedef struct
     char *filepath;
 } ReaderStructure;
 
+typedef struct
+{
+    SharedQueue *reader_queue;
+    SharedQueue *compressor_queue;
+} CompressorStructure;
+
+typedef struct
+{
+    SharedQueue *compressor_queue;
+    char *filepath;
+} WriterStructure;
+
 /**
  * Prototypes
  */
@@ -52,40 +66,52 @@ void *writer(void *arg);
  */
 int main(int argc, char *argv[])
 {
-    // Create the structure for the reader thread
+    // Create the structures for the threads
     ReaderStructure reader_structure;
+    CompressorStructure compressor_structure;
+    WriterStructure writer_structure;
 
-    // Create the reader FIFO buffer
+    // Create the buffers
     SharedQueue reader_queue;
+    SharedQueue compressor_queue;
 
-    // Initiate the buffer
+    // Initiate the buffers
     TAILQ_INIT(&reader_queue.head);
     pthread_mutex_init(&reader_queue.mutex, NULL);
     pthread_cond_init(&reader_queue.cond, NULL);
-
-    // Assign the buffer to the reader structure
-    reader_structure.queue = &reader_queue;
-
-    // Set is_finished to false
     reader_queue.is_finished = 0;
 
-    // Assign the file path
+    TAILQ_INIT(&compressor_queue.head);
+    pthread_mutex_init(&compressor_queue.mutex, NULL);
+    pthread_cond_init(&compressor_queue.cond, NULL);
+    compressor_queue.is_finished = 0;
+
+    // Assign the buffers to the structures
+    reader_structure.queue = &reader_queue;
+
+    compressor_structure.reader_queue = &reader_queue;
+    compressor_structure.compressor_queue = &compressor_queue;
+
+    writer_structure.compressor_queue = &compressor_queue;
+
+    // Assign the file paths
     reader_structure.filepath = argv[1];
+    writer_structure.filepath = argv[2];
 
     // Create the thread IDs
-    pthread_t read_thread;
-    pthread_t compress_thread;
-    pthread_t write_thread;
+    pthread_t reader_thread;
+    pthread_t compressor_thread;
+    pthread_t writer_thread;
 
     // Create the threads
-    pthread_create(&read_thread, NULL, reader, &reader_structure);
-    pthread_create(&compress_thread, NULL, compressor, NULL);
-    pthread_create(&write_thread, NULL, writer, NULL);
+    pthread_create(&reader_thread, NULL, reader, &reader_structure);
+    pthread_create(&compressor_thread, NULL, compressor, &compressor_structure);
+    pthread_create(&writer_thread, NULL, writer, &writer_structure);
 
     // Join the threads
-    pthread_join(read_thread, NULL);
-    pthread_join(compress_thread, NULL);
-    pthread_join(write_thread, NULL);
+    pthread_join(reader_thread, NULL);
+    pthread_join(compressor_thread, NULL);
+    pthread_join(writer_thread, NULL);
 
     return 0;
 }
@@ -94,12 +120,12 @@ void *reader(void *arg)
 {
     // Get the reader structure
     ReaderStructure *reader_structure = (ReaderStructure *)arg;
+
+    // Extract the queue
     SharedQueue *queue = (SharedQueue *)reader_structure->queue;
 
-    FILE *file;
-
     // Try to open the file
-    file = fopen(reader_structure->filepath, "r");
+    FILE *file = fopen(reader_structure->filepath, "r");
 
     // Check for failure
     if (file == NULL)
@@ -126,6 +152,8 @@ void *reader(void *arg)
         // Insert the node into the queue
         TAILQ_INSERT_TAIL(&queue->head, element, entries);
 
+        pthread_cond_signal(&queue->cond);
+
         // Unlock the queue
         pthread_mutex_unlock(&queue->mutex);
     }
@@ -135,6 +163,8 @@ void *reader(void *arg)
 
     queue->is_finished = 1;
 
+    pthread_cond_broadcast(&queue->cond);
+
     // Unlock the queue
     pthread_mutex_unlock(&queue->mutex);
 
@@ -142,22 +172,119 @@ void *reader(void *arg)
     fclose(file);
 };
 
-void *compressor(void *arg) {
-    //  struct node *first = TAILQ_FIRST(&queue->head);
+/**
+ *
+ */
+void *compressor(void *arg)
+{
+    CompressorStructure *compressor_structure = (CompressorStructure *)arg;
 
-    // while (first != NULL) {
-    //     printf("Front item: %s\n", first->data);
-    //     TAILQ_REMOVE(&queue->head, first, entries);
-    //     free(first);
+    // Extract the queues
+    SharedQueue *reader_queue = compressor_structure->reader_queue;
+    SharedQueue *compressor_queue = compressor_structure->compressor_queue;
 
-    //     first = TAILQ_FIRST(&queue->head);
-    // }
+    while (true)
+    {
+        pthread_mutex_lock(&reader_queue->mutex);
+
+        while (TAILQ_EMPTY(&reader_queue->head) && !reader_queue->is_finished)
+            pthread_cond_wait(&reader_queue->cond, &reader_queue->mutex);
+
+        if (TAILQ_EMPTY(&reader_queue->head) && reader_queue->is_finished)
+        {
+            pthread_mutex_unlock(&reader_queue->mutex);
+            break;
+        }
+
+        struct node *element = TAILQ_FIRST(&reader_queue->head);
+
+        TAILQ_REMOVE(&reader_queue->head, element, entries);
+
+        char *word = strtok(element->data, " ");
+        pthread_mutex_unlock(&reader_queue->mutex);
+
+        // Create the node to hold the compressed data
+        struct node *compressed_element = malloc(sizeof(struct node));
+
+        while (word != NULL)
+        {
+            // Convert the word into the symbol
+            int sym_index = word_to_sym(word);
+
+            if (sym_index >= 0)
+            {
+                char *symbol = malloc(sizeof(SYM[sym_index]) + 1);
+
+                symbol = SYM[sym_index] + "\0";
+
+                // Copy the symbol into the node data
+                strcat(compressed_element->data, symbol);
+            }
+            else
+                strcat(compressed_element->data, word);
+
+            strcat(compressed_element->data, " ");
+
+            // Get the next word
+            word = strtok(NULL, " ");
+        }
+
+        pthread_mutex_lock(&compressor_queue->mutex);
+        TAILQ_INSERT_TAIL(&compressor_queue->head, compressed_element, entries);
+        pthread_cond_signal(&compressor_queue->cond);
+        pthread_mutex_unlock(&compressor_queue->mutex);
+
+        free(element);
+    }
+
+    pthread_mutex_lock(&compressor_queue->mutex);
+    compressor_queue->is_finished = 1;
+    pthread_cond_broadcast(&compressor_queue->cond);
+    pthread_mutex_unlock(&compressor_queue->mutex);
+
+    return NULL;
 };
 
-void *writer(void *arg) {
-    // Create file
+/**
+ *
+ */
+void *writer(void *arg)
+{
+    WriterStructure *writer_structure = (WriterStructure *)arg;
 
-    // Get words from the compressor buffer
+    // Extract the queue
+    SharedQueue *compressor_queue = writer_structure->compressor_queue;
 
-    // write to file
+    // Try to open the file
+    FILE *file = fopen(writer_structure->filepath, "w");
+
+    // Check for failure
+    if (file == NULL)
+        return NULL;
+
+    while (true)
+    {
+        pthread_mutex_lock(&compressor_queue->mutex);
+
+        while (TAILQ_EMPTY(&compressor_queue->head) && !compressor_queue->is_finished)
+            pthread_cond_wait(&compressor_queue->cond, &compressor_queue->mutex);
+
+        if (TAILQ_EMPTY(&compressor_queue->head) && compressor_queue->is_finished)
+        {
+            pthread_mutex_unlock(&compressor_queue->mutex);
+            break;
+        }
+
+        struct node *element = TAILQ_FIRST(&compressor_queue->head);
+
+        TAILQ_REMOVE(&compressor_queue->head, element, entries);
+
+        pthread_mutex_unlock(&compressor_queue->mutex);
+
+        fprintf(file, "%s", element->data);
+
+        free(element);
+    }
+
+    fclose(file);
 };
