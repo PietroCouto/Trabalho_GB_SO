@@ -11,17 +11,17 @@
 #define LINE_LENGTH 1024
 
 /**
- * Reader queue node
+ * Queue node
  */
-struct reader_node
+struct node
 {
     char data[LINE_LENGTH];
-    TAILQ_ENTRY(reader_node)
+    TAILQ_ENTRY(node)
     entries;
 };
 
 // Define the queue head type
-TAILQ_HEAD(tailhead, reader_node);
+TAILQ_HEAD(tailhead, node);
 
 typedef struct
 {
@@ -29,8 +29,13 @@ typedef struct
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int is_finished;
+} SharedQueue;
+
+typedef struct
+{
+    SharedQueue *queue;
     char *filepath;
-} SharedReaderQueue;
+} ReaderStructure;
 
 /**
  * Prototypes
@@ -47,25 +52,37 @@ void *writer(void *arg);
  */
 int main(int argc, char *argv[])
 {
-    SharedReaderQueue reader_queue;
+    // Create the structure for the reader thread
+    ReaderStructure reader_structure;
 
-    /**
-     * Prepare the reader queue
-     */
+    // Create the reader FIFO buffer
+    SharedQueue reader_queue;
+
+    // Initiate the buffer
     TAILQ_INIT(&reader_queue.head);
     pthread_mutex_init(&reader_queue.mutex, NULL);
     pthread_cond_init(&reader_queue.cond, NULL);
-    reader_queue.is_finished = 0;
-    reader_queue.filepath = argv[1];
 
+    // Assign the buffer to the reader structure
+    reader_structure.queue = &reader_queue;
+
+    // Set is_finished to false
+    reader_queue.is_finished = 0;
+
+    // Assign the file path
+    reader_structure.filepath = argv[1];
+
+    // Create the thread IDs
     pthread_t read_thread;
     pthread_t compress_thread;
     pthread_t write_thread;
 
-    pthread_create(&read_thread, NULL, reader, &reader_queue);
+    // Create the threads
+    pthread_create(&read_thread, NULL, reader, &reader_structure);
     pthread_create(&compress_thread, NULL, compressor, NULL);
     pthread_create(&write_thread, NULL, writer, NULL);
 
+    // Join the threads
     pthread_join(read_thread, NULL);
     pthread_join(compress_thread, NULL);
     pthread_join(write_thread, NULL);
@@ -75,13 +92,14 @@ int main(int argc, char *argv[])
 
 void *reader(void *arg)
 {
-    // Get the queue structure
-    SharedReaderQueue *queue = (SharedReaderQueue *)arg;
+    // Get the reader structure
+    ReaderStructure *reader_structure = (ReaderStructure *)arg;
+    SharedQueue *queue = (SharedQueue *)reader_structure->queue;
 
     FILE *file;
 
     // Try to open the file
-    file = fopen(queue->filepath, "r");
+    file = fopen(reader_structure->filepath, "r");
 
     // Check for failure
     if (file == NULL)
@@ -93,21 +111,48 @@ void *reader(void *arg)
     // Create the string to hold the file lines
     char line[LINE_LENGTH];
 
-    // Start reading
+    // Reading loop
     while (fgets(line, LINE_LENGTH, file))
     {
-        struct reader_node *element = malloc(sizeof(struct reader_node));
+        // Create the node to hold the data
+        struct node *element = malloc(sizeof(struct node));
+
+        // Copy the line into the node
         strcpy(element->data, line);
+
+        // Lock the queue
+        pthread_mutex_lock(&queue->mutex);
+
+        // Insert the node into the queue
         TAILQ_INSERT_TAIL(&queue->head, element, entries);
+
+        // Unlock the queue
+        pthread_mutex_unlock(&queue->mutex);
     }
 
+    // Lock the queue
+    pthread_mutex_lock(&queue->mutex);
+
     queue->is_finished = 1;
+
+    // Unlock the queue
+    pthread_mutex_unlock(&queue->mutex);
 
     // Close the file
     fclose(file);
 };
 
-void *compressor(void *arg) {};
+void *compressor(void *arg) {
+    //  struct node *first = TAILQ_FIRST(&queue->head);
+
+    // while (first != NULL) {
+    //     printf("Front item: %s\n", first->data);
+    //     TAILQ_REMOVE(&queue->head, first, entries);
+    //     free(first);
+
+    //     first = TAILQ_FIRST(&queue->head);
+    // }
+};
 
 void *writer(void *arg) {
     // Create file
