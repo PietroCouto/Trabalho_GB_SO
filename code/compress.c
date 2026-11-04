@@ -8,6 +8,7 @@
 #include <sys/queue.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 #include "libs/dictionary.h"
 
@@ -58,6 +59,7 @@ typedef struct
 void *reader(void *arg);
 void *compressor(void *arg);
 void *writer(void *arg);
+void add_char(char *s, char c);
 
 /**
  * Main function
@@ -203,46 +205,48 @@ void *compressor(void *arg)
 
         TAILQ_REMOVE(&reader_queue->head, element, entries);
 
-        char *word = strtok(element->data, " \n");
         pthread_mutex_unlock(&reader_queue->mutex);
 
         // Create the node to hold the compressed data
         struct node *compressed_element = calloc(1, sizeof(struct node));
 
-        char punctuation[2] = " ";
+        int c;      // caractere lido do arquivo
+        int wl = 0; // comprimento atual da palavra
+        int i = 0;
+        char w[256]; // buffer temporário para armazenar uma palavra
 
-        while (word != NULL)
+        while ((c = element->data[i]) != '\0' && c != '\n')
         {
-            punctuation[0] = ' ';
-
-            if (strcspn(word, ",.") != strlen(word))
-            {
-                punctuation[0] = word[strlen(word) - 1];
-                word[strlen(word) - 1] = '\0';
-            }
-
-            // Convert the word into the symbol
-            int sym_index = word_to_sym(word);
-
-            if (sym_index >= 0)
-            {
-                char symbol[2];
-                symbol[0] = (char)sym_index;
-                symbol[1] = '\0';
-
-                // Copy the symbol into the node data
-                strcat(compressed_element->data, symbol);
-            }
+            if (isalnum(c) || c == '_')
+                w[wl++] = c;
             else
-                strcat(compressed_element->data, word);
+            {
+                if (wl)
+                {
+                    w[wl] = 0;
+                    wl = 0;
+                    int s = word_to_sym(w);
 
-            if (punctuation[0] != ' ')
-                strcat(compressed_element->data, punctuation);
+                    if (s >= 0)
+                        add_char(compressed_element->data, (char)s);
 
-            strcat(compressed_element->data, " ");
+                    else
+                        strcat(compressed_element->data, w);
+                }
+                add_char(compressed_element->data, (char)c);
+            }
 
-            // Get the next word
-            word = strtok(NULL, " \n");
+            i++;
+        }
+
+        if (wl)
+        {
+            w[wl] = 0;
+            int s = word_to_sym(w);
+            if (s >= 0)
+                add_char(compressed_element->data, (char)s);
+            else
+                strcat(compressed_element->data, w);
         }
 
         pthread_mutex_lock(&compressor_queue->mutex);
@@ -297,12 +301,27 @@ void *writer(void *arg)
 
         pthread_mutex_unlock(&compressor_queue->mutex);
 
-        fprintf(file, "%s", element->data);
+        fprintf(file, "%s\n", element->data);
 
+        fflush(file);
+        
         free(element);
     }
 
     fclose(file);
 
     return NULL;
+}
+
+void add_char(char *s, char c)
+{
+
+    // Get the current length of the string
+    int l = strlen(s);
+
+    // Add the new character at the end
+    s[l] = c;
+
+    // Add the null terminator
+    s[l + 1] = '\0';
 }
