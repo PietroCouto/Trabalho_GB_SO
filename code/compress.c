@@ -171,7 +171,9 @@ void *reader(void *arg)
 
     // Close the file
     fclose(file);
-};
+
+    return NULL;
+}
 
 /**
  *
@@ -212,7 +214,7 @@ void *compressor(void *arg)
         while (word != NULL)
         {
             punctuation[0] = ' ';
-            
+
             if (strcspn(word, ",.") != strlen(word))
             {
                 punctuation[0] = word[strlen(word) - 1];
@@ -257,7 +259,7 @@ void *compressor(void *arg)
     pthread_mutex_unlock(&compressor_queue->mutex);
 
     return NULL;
-};
+}
 
 /**
  *
@@ -301,4 +303,6 @@ void *writer(void *arg)
     }
 
     fclose(file);
-};
+
+    return NULL;
+}
