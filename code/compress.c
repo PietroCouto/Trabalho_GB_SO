@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <sys/queue.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "libs/dictionary.h"
 
@@ -200,14 +201,24 @@ void *compressor(void *arg)
 
         TAILQ_REMOVE(&reader_queue->head, element, entries);
 
-        char *word = strtok(element->data, " ");
+        char *word = strtok(element->data, " \n");
         pthread_mutex_unlock(&reader_queue->mutex);
 
         // Create the node to hold the compressed data
         struct node *compressed_element = calloc(1, sizeof(struct node));
 
+        char punctuation[2] = " ";
+
         while (word != NULL)
         {
+            punctuation[0] = ' ';
+            
+            if (strcspn(word, ",.") != strlen(word))
+            {
+                punctuation[0] = word[strlen(word) - 1];
+                word[strlen(word) - 1] = '\0';
+            }
+
             // Convert the word into the symbol
             int sym_index = word_to_sym(word);
 
@@ -223,10 +234,13 @@ void *compressor(void *arg)
             else
                 strcat(compressed_element->data, word);
 
+            if (punctuation[0] != ' ')
+                strcat(compressed_element->data, punctuation);
+
             strcat(compressed_element->data, " ");
 
             // Get the next word
-            word = strtok(NULL, " ");
+            word = strtok(NULL, " \n");
         }
 
         pthread_mutex_lock(&compressor_queue->mutex);
