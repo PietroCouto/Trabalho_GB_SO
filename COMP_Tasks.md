@@ -6,49 +6,18 @@ Tasks em ordem de execução: as primeiras bloqueiam as seguintes. Linhas se ref
 
 | ID | Título | Tipo | Prioridade | Status |
 |----|--------|------|------------|--------|
-| COMP-1 | `compressed_element` não é inicializado | Bug | Crítica | [x] |
-| COMP-2 | Símbolo montado com aritmética de ponteiro inválida | Bug | Crítica | [x] |
 | COMP-3 | Tokenização incompatível com o formato do `mini_zip` | Bug | Alta | [ ] |
 | COMP-4 | Palavra pode ultrapassar o buffer de acumulação | Bug | Média | [ ] |
-| COMP-5 | Funções de thread sem `return` | Bug | Média | [ ] |
-| COMP-6 | Falta `#include <stdbool.h>` | Bug | Baixa | [ ] |
 | COMP-7 | Falhas de abertura de arquivo não avisam ninguém | Bug | Alta | [ ] |
 | COMP-8 | Fila sem limite de tamanho (sem backpressure) | Melhoria | Média | [ ] |
 | COMP-9 | Vazamentos de memória | Bug | Baixa | [ ] |
 | COMP-10 | Estatísticas e IPC com o Monitor | Feature | Alta | [ ] |
-| COMP-11 | Dicionário e formato ambíguo | Decisão | Alta | [ ] |
 
 ### Ordem recomendada
 
-1. COMP-1, COMP-2, COMP-3 e COMP-4: núcleo da correção. Na prática viram uma única função "comprimir uma linha".
-2. COMP-5 e COMP-6: rápidos.
-3. COMP-7, COMP-9 e COMP-8.
-4. COMP-11 e COMP-10: dependem do grupo.
-
----
-
-## COMP-1 · `compressed_element` não é inicializado
-**Tipo:** Bug · **Prioridade:** Crítica · **Local:** `compress.c:207`
-
-**Problema:** `malloc(sizeof(struct node))` devolve memória com lixo. Em seguida o código faz `strcat(compressed_element->data, ...)`, que procura o `\0` para saber onde concatenar. Como o `data` começa com bytes aleatórios, o `strcat` escreve no lugar errado ou depois do lixo. É o que gera os `���` na saída.
-
-**Solução:** Zerar o nó na criação (`calloc`, ou `data[0] = '\0'` logo depois do `malloc`). Melhor ainda: manter um índice `out_len` e escrever com `memcpy` ou `snprintf`, sem usar `strcat` (ver COMP-3).
-
-**Critério de aceite:** nenhum byte inesperado na saída. `valgrind` não reporta "uninitialised value".
-
----
-
-## COMP-2 · Símbolo montado com aritmética de ponteiro inválida
-**Tipo:** Bug · **Prioridade:** Crítica · **Local:** `compress.c:216-221`
-
-**Problema:** `symbol = SYM[sym_index] + "\0";` soma um número (o código ASCII do símbolo) ao endereço da string literal `"\0"`. O resultado é um ponteiro para um lugar qualquer da memória. Além disso:
-- o `malloc` da linha anterior vaza, porque o ponteiro é sobrescrito e nunca é liberado;
-- `sizeof(SYM[sym_index])` vale 1 (é um `unsigned char`), então o tamanho do malloc também não faz sentido;
-- o `strcat` copia lixo.
-
-**Solução:** Um símbolo é só 1 caractere. Não precisa de malloc nem de string. Basta anexá-lo diretamente ao buffer de saída: `out[out_len++] = (char)sym;`. Detalhe: `word_to_sym` já devolve o próprio símbolo, e não o índice. O nome `sym_index` na variável confunde.
-
-**Critério de aceite:** nenhum `malloc` dentro do loop de palavras.
+1. COMP-3 e COMP-4: núcleo da correção. Na prática viram uma única função "comprimir uma linha".
+2. COMP-7, COMP-9 e COMP-8.
+3. COMP-10: depende do grupo.
 
 ---
 
@@ -78,24 +47,6 @@ Isso também elimina o problema do item 2, porque o separador original nunca é 
 **Problema:** O `mini_zip` usa `char w[256]` e nunca verifica `wl`. Uma palavra com 256+ letras estoura o buffer. Também não há proteção contra o `data[1024]` do nó.
 
 **Solução:** Verificar `wl < sizeof(w) - 1` antes de acumular. Se a palavra for maior, descarregá-la como "não encontrada" e recomeçar. Fazer o mesmo para o buffer de saída: o pior caso é a saída do tamanho da entrada (símbolo ≤ palavra), então um buffer do mesmo tamanho do de entrada basta.
-
----
-
-## COMP-5 · Funções de thread sem `return`
-**Tipo:** Bug · **Prioridade:** Média · **Local:** `compress.c:173` (reader) e `compress.c:290` (writer)
-
-**Problema:** `reader` e `writer` têm tipo `void *`, mas não retornam nada no final. É comportamento indefinido em C e o `pthread_join` pode ler um valor aleatório. Também existe `};` com ponto e vírgula sobrando depois do fim das funções.
-
-**Solução:** Adicionar `return NULL;` no final de cada uma e remover o `;` sobrando.
-
----
-
-## COMP-6 · Falta `#include <stdbool.h>`
-**Tipo:** Bug · **Prioridade:** Baixa · **Local:** `compress.c:186, 265`
-
-**Problema:** O código usa `true`, mas não inclui `stdbool.h`. Compila hoje só por acaso, porque algum outro header traz isso. Em outro compilador ou versão pode falhar.
-
-**Solução:** Incluir `<stdbool.h>`.
 
 ---
 
@@ -147,16 +98,3 @@ Isso também elimina o problema do item 2, porque o separador original nunca é 
 Fica para depois de arrumar o compressor.
 
 ---
-
-## COMP-11 · Dicionário e formato ambíguo (decisão de grupo)
-**Tipo:** Decisão técnica · **Prioridade:** Alta (bloqueia o decompress) · **Local:** `libs/dictionary.h`
-
-**Problema:**
-1. Os símbolos `0-9`, `:`, `;`, `?`, `!`, `"`, `'` etc. também ocorrem em textos normais. O descompactador troca esses caracteres por palavras e destrói o texto original (por exemplo, um "5" original vira uma palavra).
-2. O dicionário tem 39 palavras. O desafio exige cobrir todas as palavras dos dois textos, e `SYM` só tem 39 símbolos disponíveis.
-
-**Solução:** Escolher uma das opções:
-- (a) Usar bytes não imprimíveis ou ≥ 128 como símbolos, o que dá até ~200 palavras sem ambiguidade com texto ASCII;
-- (b) Manter os símbolos e usar um caractere de escape para dados literais que colidam com eles.
-
-A opção (a) é mais simples. A decisão precisa ser tomada com Pietro e Vitor, porque o `decompress` usa o mesmo `dictionary.h`.
