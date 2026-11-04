@@ -2,6 +2,9 @@
  * @authors Pietro do Couto Freitas, Luiz Sergio Chisté Fogaça e Vitor Martins de Souza
  */
 
+/**
+ * Libraries
+ */
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -9,22 +12,37 @@
 #include <stdbool.h>
 #include <ctype.h>
 
+/**
+ * Handmade Libraries
+ */
 #include "libs/dictionary.h"
 #include "libs/utils.h"
 #include "libs/queue.h"
 
+/**
+ * ReaderStructure
+ * Contains the reader thread parameter structure
+ */
 typedef struct
 {
     SharedQueue *queue;
     char *filepath;
 } ReaderStructure;
 
+/**
+ * CompressorStructure
+ * Contains the compressor thread parameter structure
+ */
 typedef struct
 {
     SharedQueue *reader_queue;
     SharedQueue *compressor_queue;
 } CompressorStructure;
 
+/**
+ * WriterStructure
+ * Contains the writer thread parameter structure
+ */
 typedef struct
 {
     SharedQueue *queue;
@@ -34,15 +52,17 @@ typedef struct
 /**
  * Prototypes
  */
+
 void *reader(void *arg);
 void *compressor(void *arg);
 void *writer(void *arg);
 void startup_structures(ReaderStructure *reader_structure, CompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path);
+void compress_line(struct node *element, struct node *compressed_element);
 
 /**
- * Main function
+ * Compresses a file
  * @param argc Argument count
- * @param argv Arguments
+ * @param argv Arguments input_filepath and output_filepath
  * @returns -1 for error, 0 for success
  */
 int main(int argc, char *argv[])
@@ -76,6 +96,7 @@ int main(int argc, char *argv[])
     pthread_join(compressor_thread, NULL);
     pthread_join(writer_thread, NULL);
 
+    // Clear the queues
     pthread_mutex_destroy(&reader_structure.queue->mutex);
     pthread_cond_destroy(&reader_structure.queue->cond);
     free(reader_structure.queue);
@@ -87,6 +108,14 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+/**
+ * Creates the queues and assembles the structures
+ * @param reader_structure Pointer to the reader structure
+ * @param compressor_structure Pointer to the compressor structure
+ * @param writer_structure Pointer to the writer structure
+ * @param input_path The input file path
+ * @param output_path The output file path
+ */
 void startup_structures(ReaderStructure *reader_structure, CompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path)
 {
     // Create the buffers
@@ -149,6 +178,7 @@ void *reader(void *arg)
         insert_element(queue, element);
     }
 
+    // Finishes the reader queue
     finish_queue(queue);
 
     // Close the file
@@ -163,6 +193,7 @@ void *reader(void *arg)
  */
 void *compressor(void *arg)
 {
+    // Get the compressor structure
     CompressorStructure *compressor_structure = (CompressorStructure *)arg;
 
     // Extract the queues
@@ -171,58 +202,27 @@ void *compressor(void *arg)
 
     while (true)
     {
+        // Try to get the next element in the reader queue
         struct node *element = get_element(reader_queue);
 
+        // Check if the reader queue has ended
         if (element == NULL)
             break;
 
         // Create the node to hold the compressed data
         struct node *compressed_element = calloc(1, sizeof(struct node));
 
-        int c;      // caractere lido do arquivo
-        int wl = 0; // comprimento atual da palavra
-        int i = 0;
-        char w[256]; // buffer temporário para armazenar uma palavra
+        // Compress the element line
+        compress_line(element, compressed_element);
 
-        while ((c = element->data[i]) != '\0')
-        {
-            if (isalnum(c) || c == '_')
-                w[wl++] = c;
-            else
-            {
-                if (wl)
-                {
-                    w[wl] = 0;
-                    wl = 0;
-                    int s = word_to_sym(w);
-
-                    if (s >= 0)
-                        add_char(compressed_element->data, (char)s);
-                    else
-                        strcat(compressed_element->data, w);
-                }
-                add_char(compressed_element->data, (char)c);
-            }
-
-            i++;
-        }
-
-        if (wl)
-        {
-            w[wl] = 0;
-            int s = word_to_sym(w);
-
-            if (s >= 0)
-                add_char(compressed_element->data, (char)s);
-            else
-                strcat(compressed_element->data, w);
-        }
-
+        // Insert the compressed line into the queue
         insert_element(compressor_queue, compressed_element);
 
+        // Free the element memory
         free(element);
     }
 
+    // End the compressor queue
     finish_queue(compressor_queue);
 
     return NULL;
@@ -237,30 +237,91 @@ void *writer(void *arg)
     WriterStructure *writer_structure = (WriterStructure *)arg;
 
     // Extract the queue
-    SharedQueue *compressor_queue = writer_structure->queue;
+    SharedQueue *queue = writer_structure->queue;
 
-    // Try to open the file
+    // Try to open the output file
     FILE *file = fopen(writer_structure->filepath, "w");
 
-    // Check for failure
+    // Check for failure to open the output file
     if (file == NULL)
         return NULL;
 
     while (true)
     {
-        struct node *element = get_element(compressor_queue);
+        // Try to get the next element from the queue
+        struct node *element = get_element(queue);
 
+        // Check if the queue has ended
         if (element == NULL)
             break;
 
+        // Write the element to the output file
         fprintf(file, "%s", element->data);
 
+        // Flush the file to force fprintf to write
         fflush(file);
 
+        // Free the element memory
         free(element);
     }
 
+    // Close the output file
     fclose(file);
 
     return NULL;
+}
+
+/**
+ * Compresses a string node
+ * @param element The node containing the string to be compressed
+ * @param compresssed_element The node to hold the compressed string
+ */
+void compress_line(struct node *element, struct node *compressed_element)
+{
+    int character;
+    int word_length = 0;
+    char word[256];
+
+    // Loop through the entire line
+    for(int i = 0; (character = element->data[i]) != '\0'; i++)
+    {
+        // Check if the character is part of a word
+        if (isalnum(character) || character == '_')
+        {
+            word[word_length++] = character;
+            continue;
+        }
+
+        // Check if it is a word
+        if (word_length)
+        {
+            word[word_length] = 0;
+            word_length = 0;
+
+            // Try to compress the word
+            int symbol = word_to_sym(word);
+
+            // Check if the word matches the dictionary
+            if (symbol >= 0)
+                add_char(compressed_element->data, (char)symbol);
+
+            // If it does not, simply add it
+            else
+                strcat(compressed_element->data, word);
+        }
+
+        // If we have a standalone character, just add it
+        add_char(compressed_element->data, (char)character);
+    }
+
+    if (word_length)
+    {
+        word[word_length] = 0;
+        int symbol = word_to_sym(word);
+
+        if (symbol >= 0)
+            add_char(compressed_element->data, (char)symbol);
+        else
+            strcat(compressed_element->data, word);
+    }
 }
