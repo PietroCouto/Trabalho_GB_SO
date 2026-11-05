@@ -4,7 +4,7 @@
 #ifndef DICTIONARY_H
 #define DICTIONARY_H
 
-#define SHIFT_CHAR 0x0E //ControlChar: the word next to it start with uppercase
+#define SHIFT_CHAR 0x0E // ControlChar: the word next to it start with uppercase
 /**
  * The available symbols
  */
@@ -44,11 +44,15 @@ static int word_to_sym(const char *word)
  * @param symbol Integer representing the symbol to translate
  * @returns NULL for no match, WORD for match
  */
-static const char *sym_to_word(int symbol)
+static char *sym_to_word(int symbol)
 {
     for (int i = 0; i < DICTIONARY_SIZE; i++)
         if (SYM[i] == (unsigned char)symbol)
-            return WORD[i];
+        {
+            char *word = calloc(1, sizeof(WORD[i]));
+            strcpy(word, WORD[i]);
+            return word;
+        }
 
     return NULL;
 }

@@ -58,6 +58,7 @@ void *compressor(void *arg);
 void *writer(void *arg);
 void startup_structures(ReaderStructure *reader_structure, CompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path);
 void compress_line(struct node *element, struct node *compressed_element);
+static void flush_word(char *word, int *word_length, char *output);
 
 /**
  * Compresses a file
@@ -271,8 +272,10 @@ void *writer(void *arg)
     return NULL;
 }
 
-static void flush_word(char *word, int *word_length, char *output){
-    if (*word_length == 0) return;
+static void flush_word(char *word, int *word_length, char *output)
+{
+    if (*word_length == 0)
+        return;
 
     word[*word_length] = '\0';
     int length = *word_length;
@@ -283,7 +286,8 @@ static void flush_word(char *word, int *word_length, char *output){
     int reversible = 1;
 
     // Build the lowercase copy used for the dictionary lookup
-    for (int i = 0; i < length; i++){
+    for (int i = 0; i < length; i++)
+    {
         // Only "W/word"  can be rebuilt by decompressor
         if (i > 0 && isupper(word[i]))
             reversible = 0;
@@ -295,7 +299,8 @@ static void flush_word(char *word, int *word_length, char *output){
     int symbol = reversible ? word_to_sym(lower) : -1;
 
     // Not in the dictionary, or not worth it: SHIFT + symbol is not shorter than 1 or 2 letters
-    if (symbol < 0 || (starts_upper && length <= 2)){
+    if (symbol < 0 || (starts_upper && length <= 2))
+    {
         strcat(output, word);
         return;
     }
@@ -318,7 +323,7 @@ void compress_line(struct node *element, struct node *compressed_element)
     char word[256];
 
     // Loop through the entire line
-    for(int i = 0; (character = element->data[i]) != '\0'; i++)
+    for (int i = 0; (character = element->data[i]) != '\0'; i++)
     {
         // Check if the character is part of a word
         if (isalnum(character) || character == '_')

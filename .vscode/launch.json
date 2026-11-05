@@ -47,7 +47,8 @@
       "preLaunchTask": "Compile main.c",
       "args": [
         "decompress",
-        "${workspaceRoot}/data/entrada.txt"
+        "${workspaceRoot}/data/entrada_compactada.txt",
+        "${workspaceRoot}/data/entrada_descompactada.txt"
       ]
     }
   ]

@@ -4,201 +4,50 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <pthread.h>
- 
-#include "dictionary.h"
-#include "shared.h"
+#include <stdbool.h>
 
-#define IN_CHUNK 4096 //Bytes lidos do arquivo compactado 
-#define QUEUE_SIZE 8 //Tamanho da fila de blocos descompactados
+/**
+ * Handmade Libraries
+ */
+#include "libs/dictionary.h"
+#include "libs/utils.h"
+#include "libs/queue.h"
 
+/**
+ * ReaderStructure
+ * Contains the reader thread parameter structure
+ */
+typedef struct
+{
+    SharedQueue *queue;
+    char *filepath;
+} ReaderStructure;
 
-typedef struct {
-    char *data;
-    size_t len;
-} chunk_t;
+/**
+ * CompressorStructure
+ * Contains the compressor thread parameter structure
+ */
+typedef struct
+{
+    SharedQueue *reader_queue;
+    SharedQueue *decompressor_queue;
+} DecompressorStructure;
 
-typedef struct {
-    chunk_t *SLOTS[QUEUE_SLOTS];
-    int head, tail, count;
-    int closed;
-    pthread_mutex_t mutex;
-    pthread_cond_t not_full;
-    pthread_cond_t not_empty;
-} queue_t;
+/**
+ * WriterStructure
+ * Contains the writer thread parameter structure
+ */
+typedef struct
+{
+    SharedQueue *queue;
+    char *filepath;
+} WriterStructure;
 
-static void queue_init(queue_t *q){
-    memset(q, 0, sizeof(*q));
-    pthread_mutex_init(&q->mutex, NULL);
-    pthread_cond_init(&q->not_full, NULL);
-    pthread_cond_init(&q->not_empty, NULL);
-}
-
-static void queue_destroy(queue_t *q){
-    pthread_mutex_destroy(&q->mutex);
-    pthread_cond_destroy(&q->not_full);
-    pthread_cond_destroy(&q->not_empty);
-} 
-
-static void queue_push(queue_t *q, chunk_t *chunk){
-    pthread_mutex_lock(&q->mutex);
-    while(q->count == QUEUE_SLOTS){
-        pthread_cond_wait(&q->not_full, &q->mutex);
-    }
-;
-    q->SLOTS[q->tail] = chunk;
-    q->tail = (q->tail + 1) % QUEUE_SLOTS;
-    q->count++;
-
-    pthread_cond_signal(&q->not_empty);
-    pthread_mutex_unlock(&q->mutex);
-}
-
-static int queue_pop(queue_t *q, chunk_t *c){
-    pthread_mutex_lock(&q->mutex);
-    while(q->count == 0 && !q->closed){
-        pthread_cond_wait(&q->not_empty, &q->mutex);
-    }
-
-    if(q->count == 0){
-        pthread_mutex_unlock(&q->mutex);
-        return 0; 
-    }
-
-    *c= q->slots[q->head];
-    q->head = (q->head + 1) % QUEUE_SLOTS;
-    q->count--;
-
-    pthread_cond_signal(&q->not_full);
-    pthread_mutex_unlock(&q->mutex);
-    return 1; 
-}
-
-
-
-static void queue_close(queue_t *q){
-    pthread_mutex_lock(&q->mutex);
-    q->closed = 1;
-    pthread_cond_broadcast(&q->not_empty);
-    pthread_mutex_unlock(&q->mutex);
-}
-
-
-typedef struct {
-    FILE *in;
-    FILE *out;
-    queue_t *q_in;
-    queue_t *q_out;
-    stats_t *stats;
-    const char *table[256];
-    size_t max_word_len;
-    int error;
-} ctx_t;
-
-#define STAT_ADD(ctx, field, n)                                  
-    do{                                                            
-        if ((ctx)->stats)                                        
-            atomic_fetch_add(&(ctx)->stats->field, (unsigned long)(n)); 
-    } while (0)
-
-
-static void build_table(ctx_t *ctx){
-    memset(ctx->table, 0, sizeof(ctx->table));
-    ctx->max_word_len = 1;
-
-    for(int i=0; i < DICT_SIZE; i++){
-        ctx->table[SYM[i]] = WORD[i];
-        if(strlen(WORD[i]) > ctx->max_word_len)
-            ctx->max_word_len = strlen(WORD[i]);
-    }
-} 
-
-static void *reader_thread(void *arg){
-    ctx_t *ctx = arg; 
-
-    while(1){
-        char *buf = malloc(IN_CHUNK);
-        if(!buf){
-            ctx->error = 1;
-            break;
-        }
-
-        size_t n = fread(buf, 1, IN_CHUNK, ctx->in);
-        if(n == 0){
-            free(buf);
-            if (FERROR(ctx->in))
-                ctx->error = 1;
-            break;
-        }  
-        STAT_ADD(ctx, compressed_size, n);
-        queue_push(&ctx->q_in, (chunk_t){buf, n});
-    }
-
-    queue_close(ctx->q_in);
-    return NULL;
-}
-
-static void *decompressor_thread(void *arg){
-    ctx_t *ctx = arg; 
-    chunk_t in;
-    int in_word = 0;
-
-    while(queue_pop(&ctx->q_in, &in)){
-        char *out = malloc(in.len * ctx->max_word_len + 1);
-        if(!out){
-            ctx->error = 1;
-            free(in.data);
-            continue;
-        }
-
-        size_t out = 0;
-        for(size_t i=0; i < in.len; i++){
-            unsigned char c = (unsigned char)in.data[i];
-            const char *word = ctx->table[c];
-            if(word){
-                size_t word_len = strlen(word);
-                memcpy(out + out, word, word_len);
-                out += word_len;
-            } else{
-                out[out++] = (char)c;
-
-                if (isalnum(c) || c == '_') {
-                    if (!in_word) {
-                        STAT_ADD(ctx, words_count, 1);
-                        STAT_ADD(ctx, words_size, 1);
-                    }
-                    in_word = 1;
-                } else {
-                    in_word = 0;
-                }
-            }
-            free(in.data);
-            queue_push(&ctx->q_out, (chunk_t){out, out});
-        }
-    }
-    queue_close(&ctx->q_out);
-    return NULL;
-}
-
-
-static void *writer_thread(void *arg){
-    ctx_t *ctx = arg; 
-    chunk_t out;
-
-    while(queue_pop(&ctx->q_out, &c)){
-      if (fwrite(c.data, 1, c.len, ctx->out) != c.len){
-            ctx->error = 1;
-    
-        }
-        STAT_ADD(ctx, decompressed_size, out.len);
-        free(out.data);
-    }
-    return NULL;
-}
-
-
+void startup_structures(ReaderStructure *reader_structure, DecompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path);
+static void *writer(void *arg);
+static void *decompressor(void *arg);
+static void *reader(void *arg);
+void decompress_line(struct node *element, struct node *decompressed_element);
 
 /**
  * Main function
@@ -208,60 +57,222 @@ static void *writer_thread(void *arg){
  */
 int main(int argc, char *argv[])
 {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Uso: %s arquivo.mzp [saida.txt]\n", argv[0]);
-        return -1;
-    }
+    if (argc < 3)
+        return return_error("Argumentos insuficientes para o descompactador!");
 
-    char out_name[512];
-    if (argc == 3) {
-        snprintf(out_name, sizeof(out_name), "%s", argv[2]);
-    } else {
-        build_output_name(argv[1], sizeof(out_name), out_name);
-    }
+    if (argc > 3)
+        return return_error("Argumentos em excesso para o descompactador!");
 
-    static ctx_t ctx;
-    ctx.in = fopen(argv[1], "rb");
-    if (!ctx.in) {
-        perror("Erro ao abrir arquivo de entrada");
-        return -1;
-    }
+    // Create the structures for the threads
+    ReaderStructure reader_structure;
+    DecompressorStructure decompressor_structure;
+    WriterStructure writer_structure;
 
-    ctx.out = fopen(out_name, "wb");
-    if (!ctx.out) {
-        perror("Erro ao abrir arquivo de saída");
-        return -1;
-    }
+    // Start the structures and queues
+    startup_structures(&reader_structure, &decompressor_structure, &writer_structure, argv[1], argv[2]);
 
-    build_table(&ctx);
-    queue_init(&ctx.q_in);
-    queue_init(&ctx.q_out);
-    ctx.stats = stats_open();
+    // Create the thread IDs
+    pthread_t reader_thread;
+    pthread_t decompressor_thread;
+    pthread_t writer_thread;
 
-    pthread_t t_read, t_dec, t_write;
-    pthread_create(&t_read, NULL, reader_thread, &ctx);
-    pthread_create(&t_dec, NULL, decompressor_thread, &ctx);
-    pthread_create(&t_write, NULL, writer_thread, &ctx);
+    pthread_create(&reader_thread, NULL, reader, &reader_structure);
+    pthread_create(&decompressor_thread, NULL, decompressor, &decompressor_structure);
+    pthread_create(&writer_thread, NULL, writer, &writer_structure);
 
-    pthread_join(t_read, NULL);
-    pthread_join(t_dec, NULL);
-    pthread_join(t_write, NULL);
+    pthread_join(reader_thread, NULL);
+    pthread_join(decompressor_thread, NULL);
+    pthread_join(writer_thread, NULL);
 
-    fclose(ctx.in);
-    fclose(ctx.out);
+    // Clear the queues
+    pthread_mutex_destroy(&reader_structure.queue->mutex);
+    pthread_cond_destroy(&reader_structure.queue->cond);
+    free(reader_structure.queue);
 
-    queue_destroy(&ctx.q_in);
-    queue_destroy(&ctx.q_out);
-
-    if (ctx.stats) {
-        atomic_store(&ctx.stats->finished, 1);
-        munmap(ctx.stats, sizeof(stats_t));
-    }
-
-    if(ctx.error) {
-        fprintf(stderr, "Erro durante a descompactação\n");
-        return -1;
-    }
+    pthread_mutex_destroy(&writer_structure.queue->mutex);
+    pthread_cond_destroy(&writer_structure.queue->cond);
+    free(writer_structure.queue);
 
     return 0;
+}
+
+/**
+ * Creates the queues and assembles the structures
+ * @param reader_structure Pointer to the reader structure
+ * @param compressor_structure Pointer to the compressor structure
+ * @param writer_structure Pointer to the writer structure
+ * @param input_path The input file path
+ * @param output_path The output file path
+ */
+void startup_structures(ReaderStructure *reader_structure, DecompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path)
+{
+    // Create the buffers
+    // Allocate the buffers on the heap
+    SharedQueue *reader_queue = malloc(sizeof(SharedQueue));
+    SharedQueue *decompressor_queue = malloc(sizeof(SharedQueue));
+
+    // Initialize queues
+    start_queue(reader_queue);
+    start_queue(decompressor_queue);
+
+    // Assign the heap pointers to the structures
+    reader_structure->queue = reader_queue;
+
+    compressor_structure->reader_queue = reader_queue;
+    compressor_structure->decompressor_queue = decompressor_queue;
+
+    writer_structure->queue = decompressor_queue;
+
+    // Assign the file paths
+    reader_structure->filepath = input_path;
+    writer_structure->filepath = output_path;
+}
+
+/**
+ * Reads a file and writes the lines to the reader buffer
+ * @param arg Pointer to the ReaderStructure
+ */
+void *reader(void *arg)
+{
+    // Get the reader structure
+    ReaderStructure *reader_structure = (ReaderStructure *)arg;
+
+    // Extract the queue
+    SharedQueue *queue = (SharedQueue *)reader_structure->queue;
+
+    // Try to open the file
+    FILE *file = fopen(reader_structure->filepath, "r");
+
+    // Check for failure
+    if (file == NULL)
+    {
+        // Lock the queue
+        finish_queue(queue);
+        return NULL;
+    }
+
+    // Create the string to hold the file lines
+    char line[LINE_LENGTH];
+
+    // Reading loop
+    while (fgets(line, LINE_LENGTH, file))
+    {
+        // Create the node to hold the data
+        struct node *element = calloc(1, sizeof(struct node));
+
+        // Copy the line into the node
+        strcpy(element->data, line);
+
+        insert_element(queue, element);
+    }
+
+    // Finishes the reader queue
+    finish_queue(queue);
+
+    // Close the file
+    fclose(file);
+
+    return NULL;
+}
+
+static void *decompressor(void *arg)
+{
+    // Get the compressor structure
+    DecompressorStructure *decompressor_structure = (DecompressorStructure *)arg;
+
+    // Extract the queues
+    SharedQueue *reader_queue = decompressor_structure->reader_queue;
+    SharedQueue *decompressor_queue = decompressor_structure->decompressor_queue;
+
+    while (true)
+    {
+        // Try to get the next element in the reader queue
+        struct node *element = get_element(reader_queue);
+
+        // Check if the reader queue has ended
+        if (element == NULL)
+            break;
+
+        // Create the node to hold the compressed data
+        struct node *decompressed_element = calloc(1, sizeof(struct node));
+
+        // Compress the element line
+        decompress_line(element, decompressed_element);
+
+        // Insert the compressed line into the queue
+        insert_element(decompressor_queue, decompressed_element);
+
+        // Free the element memory
+        free(element);
+    }
+
+    // End the compressor queue
+    finish_queue(decompressor_queue);
+
+    return NULL;
+}
+
+/**
+ * Consumes the compressed queue and writes to the output file
+ * @param arg Pointer to the WriterStructure
+ */
+void *writer(void *arg)
+{
+    WriterStructure *writer_structure = (WriterStructure *)arg;
+
+    // Extract the queue
+    SharedQueue *queue = writer_structure->queue;
+
+    // Try to open the output file
+    FILE *file = fopen(writer_structure->filepath, "w");
+
+    // Check for failure to open the output file
+    if (file == NULL)
+    {
+        finish_queue(queue);
+        return NULL;
+    }
+
+    while (true)
+    {
+        // Try to get the next element from the queue
+        struct node *element = get_element(queue);
+
+        // Check if the queue has ended
+        if (element == NULL)
+            break;
+
+        // Write the element to the output file
+        fprintf(file, "%s", element->data);
+
+        // Flush the file to force fprintf to write
+        fflush(file);
+
+        // Free the element memory
+        free(element);
+    }
+
+    // Close the output file
+    fclose(file);
+
+    return NULL;
+}
+
+void decompress_line(struct node *element, struct node *decompressed_element)
+{
+    int character;
+
+    // Garante que a string de destino inicia vazia
+    decompressed_element->data[0] = '\0';
+
+    // Percorre a linha comprimida caractere por caractere
+    for (int i = 0; (character = element->data[i]) != '\0'; i++)
+    {
+        char *word = sym_to_word(character); // Tenta achar palavra correspondente
+
+        if (word)
+            strcat(decompressed_element->data, word); // Concatena a palavra traduzida
+        else
+            add_char(decompressed_element->data, character); // Anexa o caractere normal/pontuação
+    }
 }

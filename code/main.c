@@ -15,7 +15,7 @@
  * Prototypes
  */
 int start_compress(char *input_path, char *output_path);
-int start_decompress(char *filename);
+int start_decompress(char *input_path, char *output_path);
 
 /**
  * Main function
@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
     if (strcmp(argv[1], "decompress") == 0)
     {
         // Try to start the decompressing process
-        child_pid = start_decompress(argv[2]);
+        child_pid = start_decompress(argv[2], argv[3]);
 
         // Check if the startup was successful
         if (child_pid == -1)
@@ -67,28 +67,28 @@ int main(int argc, char *argv[])
 
     // TODO criar o mecanismo IPC
 
-    int status;
+    // int status;
 
-    // Monitoring loop
-    while (true)
-    {
-        pid_t returned_pid = waitpid(child_pid, &status, WNOHANG);
+    // // Monitoring loop
+    // while (true)
+    // {
+    //     pid_t returned_pid = waitpid(child_pid, &status, WNOHANG);
 
-        if (returned_pid == -1)
-            return_error("Erro ao executar o processo!");
+    //     if (returned_pid == -1)
+    //         return_error("Erro ao executar o processo!");
 
-        if (returned_pid > 0)
-            break;
+    //     if (returned_pid > 0)
+    //         break;
 
-        /** TODO implementar a lógica de monitoramento
-         * 
-         * Exibir informações gerais da execução, como total de palavras lidas, palavras
-         * compactadas, palavras não encontradas no dicionário, tamanho original e compactado, e percentual
-         * final de compressão
-         * 
-         * acho que isso só vale para o modo de compressão...
-         */
-    }
+    //     /** TODO implementar a lógica de monitoramento
+    //      * 
+    //      * Exibir informações gerais da execução, como total de palavras lidas, palavras
+    //      * compactadas, palavras não encontradas no dicionário, tamanho original e compactado, e percentual
+    //      * final de compressão
+    //      * 
+    //      * acho que isso só vale para o modo de compressão...
+    //      */
+    // }
 
     // TODO exibir mensagem de finalização (conteúdo original, arquivo compactado, arquivo descompactado)
 
@@ -130,7 +130,7 @@ int start_compress(char *input_path, char *output_path)
  * @param filename The name of the file to be decompressed
  * @returns -1 for error, PID for success
  */
-int start_decompress(char *filename)
+int start_decompress(char *input_path, char *output_path)
 {
     pid_t pid = fork();
 
@@ -141,7 +141,7 @@ int start_decompress(char *filename)
     // Try to replace the child code
     if (pid == 0)
     {
-        char *argv[] = {"./code/compiled/decompress", (char *)filename, NULL};
+        char *argv[] = {"./code/compiled/decompress", (char *)input_path, (char *)output_path, NULL};
 
         char *envp[] = {NULL};
 
