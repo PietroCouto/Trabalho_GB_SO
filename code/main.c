@@ -14,8 +14,8 @@
 /**
  * Prototypes
  */
-int start_compress(char *input_path, char *output_path);
-int start_decompress(char *input_path, char *output_path);
+int start_compress(char *input_path, char *output_path, int (*pipe_fd)[2]);
+int start_decompress(char *input_path, char *output_path, int (*pipe_fd)[2]);
 
 /**
  * Main function
@@ -39,11 +39,16 @@ int main(int argc, char *argv[])
 
     pid_t child_pid = -1;
 
+    int pipe_fd[2];
+
+    if (pipe(pipe_fd) < 0)
+        exit(1);
+
     // Check if compress mode was selected
     if (strcmp(argv[1], "compress") == 0)
     {
         // Try to start the compressing process
-        child_pid = start_compress(argv[2], argv[3]);
+        child_pid = start_compress(argv[2], argv[3], &pipe_fd);
 
         // Check if the startup was successful
         if (child_pid == -1)
@@ -56,7 +61,7 @@ int main(int argc, char *argv[])
     if (strcmp(argv[1], "decompress") == 0)
     {
         // Try to start the decompressing process
-        child_pid = start_decompress(argv[2], argv[3]);
+        child_pid = start_decompress(argv[2], argv[3], &pipe_fd);
 
         // Check if the startup was successful
         if (child_pid == -1)
@@ -65,42 +70,49 @@ int main(int argc, char *argv[])
         printf("Descompactador inicializado! PID %i\n", child_pid);
     }
 
+    close(pipe_fd[1]);
+
     // TODO criar o mecanismo IPC
 
-    // int status;
+    int status;
 
-    // // Monitoring loop
-    // while (true)
-    // {
-    //     pid_t returned_pid = waitpid(child_pid, &status, WNOHANG);
+    // Monitoring loop
+    while (true)
+    {
+        pid_t returned_pid = waitpid(child_pid, &status, WNOHANG);
 
-    //     if (returned_pid == -1)
-    //         return_error("Erro ao executar o processo!");
+        if (returned_pid == -1)
+            return_error("Erro ao executar o processo!");
 
-    //     if (returned_pid > 0)
-    //         break;
+        if (returned_pid > 0)
+            break;
 
-    //     /** TODO implementar a lógica de monitoramento
-    //      * 
-    //      * Exibir informações gerais da execução, como total de palavras lidas, palavras
-    //      * compactadas, palavras não encontradas no dicionário, tamanho original e compactado, e percentual
-    //      * final de compressão
-    //      * 
-    //      * acho que isso só vale para o modo de compressão...
-    //      */
-    // }
+        /** TODO implementar a lógica de monitoramento
+         *
+         * Exibir informações gerais da execução, como total de palavras lidas, palavras
+         * compactadas, palavras não encontradas no dicionário, tamanho original e compactado, e percentual
+         * final de compressão
+         *
+         * acho que isso só vale para o modo de compressão...
+         */
+    }
 
     // TODO exibir mensagem de finalização (conteúdo original, arquivo compactado, arquivo descompactado)
 
+    // Close the pipe
+    close(pipe_fd[0]);
+    
     return 0;
 }
 
 /**
  * Creates the compressing process
- * @param filename The name of the file to be compressed
+ * @param input_path The file to be decompressed
+ * @param output_path The file to be written to
+ * @param pipe_fd The pipe file descriptors for communication
  * @returns -1 for error, PID for success
  */
-int start_compress(char *input_path, char *output_path)
+int start_compress(char *input_path, char *output_path, int (*pipe_fd)[2])
 {
     pid_t pid = fork();
 
@@ -110,7 +122,17 @@ int start_compress(char *input_path, char *output_path)
 
     // Try to replace the child code
     if (pid == 0)
-    {
+    { 
+        // Close the children pipe stdin
+        close((*pipe_fd)[0]);
+
+        // Redirect the children outputs
+        dup2((*pipe_fd)[1], STDOUT_FILENO);
+        dup2((*pipe_fd)[1], STDERR_FILENO);
+
+        // Close the children stdout
+        close((*pipe_fd)[1]);
+
         char *argv[] = {"./code/compiled/compress", (char *)input_path, (char *)output_path, NULL};
 
         char *envp[] = {NULL};
@@ -127,10 +149,12 @@ int start_compress(char *input_path, char *output_path)
 
 /**
  * Creates the decompressing process
- * @param filename The name of the file to be decompressed
+ * @param input_path The file to be decompressed
+ * @param output_path The file to be written to
+ * @param pipe_fd The pipe file descriptors for communication
  * @returns -1 for error, PID for success
  */
-int start_decompress(char *input_path, char *output_path)
+int start_decompress(char *input_path, char *output_path, int (*pipe_fd)[2])
 {
     pid_t pid = fork();
 
@@ -141,6 +165,16 @@ int start_decompress(char *input_path, char *output_path)
     // Try to replace the child code
     if (pid == 0)
     {
+        // Close the children pipe stdin
+        close((*pipe_fd)[0]);
+
+        // Redirect the children outputs
+        dup2((*pipe_fd)[1], STDOUT_FILENO);
+        dup2((*pipe_fd)[1], STDERR_FILENO);
+
+        // Close the children stdout
+        close((*pipe_fd)[1]);
+
         char *argv[] = {"./code/compiled/decompress", (char *)input_path, (char *)output_path, NULL};
 
         char *envp[] = {NULL};

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <sys/stat.h>
 
 /**
  * Handmade Libraries
@@ -163,6 +164,12 @@ void *reader(void *arg)
         finish_queue(queue);
         return NULL;
     }
+
+    struct stat st;
+    stat(reader_structure->filepath, &st);
+    unsigned int size = st.st_size;
+
+    fprintf(stdout, "File size %i bytes\n", size);
 
     // Create the string to hold the file lines
     char line[LINE_LENGTH];
