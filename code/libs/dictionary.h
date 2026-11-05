@@ -4,6 +4,7 @@
 #ifndef DICTIONARY_H
 #define DICTIONARY_H
 
+#define SHIFT_CHAR 0x0E //ControlChar: the word next to it start with uppercase
 /**
  * The available symbols
  */

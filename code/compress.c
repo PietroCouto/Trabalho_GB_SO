@@ -271,6 +271,41 @@ void *writer(void *arg)
     return NULL;
 }
 
+static void flush_word(char *word, int *word_length, char *output){
+    if (*word_length == 0) return;
+
+    word[*word_length] = '\0';
+    int length = *word_length;
+    *word_length = 0;
+
+    char lower[256];
+    int starts_upper = isupper((unsigned char)word[0]);
+    int reversible = 1;
+
+    // Build the lowercase copy used for the dictionary lookup
+    for (int i = 0; i < length; i++){
+        // Only "W/word"  can be rebuilt by decompressor
+        if (i > 0 && isupper(word[i]))
+            reversible = 0;
+
+        lower[i] = tolower(word[i]);
+    }
+    lower[length] = '\0';
+
+    int symbol = reversible ? word_to_sym(lower) : -1;
+
+    // Not in the dictionary, or not worth it: SHIFT + symbol is not shorter than 1 or 2 letters
+    if (symbol < 0 || (starts_upper && length <= 2)){
+        strcat(output, word);
+        return;
+    }
+
+    if (starts_upper)
+        add_char(output, SHIFT_CHAR);
+
+    add_char(output, (char)symbol);
+}
+
 /**
  * Compresses a string node
  * @param element The node containing the string to be compressed
@@ -288,40 +323,18 @@ void compress_line(struct node *element, struct node *compressed_element)
         // Check if the character is part of a word
         if (isalnum(character) || character == '_')
         {
+            // Keep the original case, flush_word handles the lowercase lookup
             word[word_length++] = character;
             continue;
         }
 
-        // Check if it is a word
-        if (word_length)
-        {
-            word[word_length] = 0;
-            word_length = 0;
-
-            // Try to compress the word
-            int symbol = word_to_sym(word);
-
-            // Check if the word matches the dictionary
-            if (symbol >= 0)
-                add_char(compressed_element->data, (char)symbol);
-
-            // If it does not, simply add it
-            else
-                strcat(compressed_element->data, word);
-        }
+        // Close the pending word, if any
+        flush_word(word, &word_length, compressed_element->data);
 
         // If we have a standalone character, just add it
         add_char(compressed_element->data, (char)character);
     }
 
-    if (word_length)
-    {
-        word[word_length] = 0;
-        int symbol = word_to_sym(word);
-
-        if (symbol >= 0)
-            add_char(compressed_element->data, (char)symbol);
-        else
-            strcat(compressed_element->data, word);
-    }
+    // Close the word left at the end of the line
+    flush_word(word, &word_length, compressed_element->data);
 }
