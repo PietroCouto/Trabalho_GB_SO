@@ -1,7 +1,23 @@
 #include <stdio.h>
+#include <unistd.h>
+#include <string.h>
 
 #ifndef UTILS_H
 #define UTILS_H
+
+//Struct with all types os stats
+typedef struct{
+    long read_bytes;
+    long write_bytes;
+    long compressed;
+    long not_found;
+    long restored;
+} Stats;
+
+//Send a copy of the stats by stdout (pipe to monitor)
+void send_stats(const Stats *stats){
+    write(STDOUT_FILENO, stats, sizeof(Stats));
+}
 
 /**
  * Prints an error message

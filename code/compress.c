@@ -11,7 +11,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
-#include <sys/stat.h>
 
 /**
  * Handmade Libraries
@@ -58,8 +57,11 @@ void *reader(void *arg);
 void *compressor(void *arg);
 void *writer(void *arg);
 void startup_structures(ReaderStructure *reader_structure, CompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path);
-void compress_line(struct node *element, struct node *compressed_element);
-static void flush_word(char *word, int *word_length, char *output);
+void compress_line(struct node *element, struct node *compressed_element, int *compressed, int *not_found);
+static int flush_word(char *word, int *word_length, char *output);
+
+static Stats stats = {0}; //Total process
+static pthread_mutex_t stats_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /**
  * Compresses a file
@@ -165,12 +167,6 @@ void *reader(void *arg)
         return NULL;
     }
 
-    struct stat st;
-    stat(reader_structure->filepath, &st);
-    unsigned int size = st.st_size;
-
-    fprintf(stdout, "File size %i bytes\n", size);
-
     // Create the string to hold the file lines
     char line[LINE_LENGTH];
 
@@ -184,6 +180,11 @@ void *reader(void *arg)
         strcpy(element->data, line);
 
         insert_element(queue, element);
+
+        // Update the shared stats
+        pthread_mutex_lock(&stats_mutex);
+        stats.read_bytes += strlen(line);
+        pthread_mutex_unlock(&stats_mutex);
     }
 
     // Finishes the reader queue
@@ -220,11 +221,21 @@ void *compressor(void *arg)
         // Create the node to hold the compressed data
         struct node *compressed_element = calloc(1, sizeof(struct node));
 
+        // Words of this line that were replaced / kept as they were
+        int compressed = 0;
+        int not_found = 0;
+
         // Compress the element line
-        compress_line(element, compressed_element);
+        compress_line(element, compressed_element, &compressed, &not_found);
 
         // Insert the compressed line into the queue
         insert_element(compressor_queue, compressed_element);
+
+        // Update the shared stats
+        pthread_mutex_lock(&stats_mutex);
+        stats.compressed += compressed;
+        stats.not_found += not_found;
+        pthread_mutex_unlock(&stats_mutex);
 
         // Free the element memory
         free(element);
@@ -269,6 +280,12 @@ void *writer(void *arg)
         // Flush the file to force fprintf to write
         fflush(file);
 
+        // Update the shared stats and send a snapshot to the Monitor
+        pthread_mutex_lock(&stats_mutex);
+        stats.write_bytes += strlen(element->data);
+        send_stats(&stats);
+        pthread_mutex_unlock(&stats_mutex);
+
         // Free the element memory
         free(element);
     }
@@ -276,13 +293,22 @@ void *writer(void *arg)
     // Close the output file
     fclose(file);
 
+    // Send the final totals
+    pthread_mutex_lock(&stats_mutex);
+    send_stats(&stats);
+    pthread_mutex_unlock(&stats_mutex);
+
     return NULL;
 }
 
-static void flush_word(char *word, int *word_length, char *output)
+/**
+ * Closes the pending word and writes it (or its symbol) to the output
+ * @returns -1 if there was no word, 0 if the word was kept as is, 1 if it became a symbol
+ */
+static int flush_word(char *word, int *word_length, char *output)
 {
     if (*word_length == 0)
-        return;
+        return -1;
 
     word[*word_length] = '\0';
     int length = *word_length;
@@ -309,21 +335,25 @@ static void flush_word(char *word, int *word_length, char *output)
     if (symbol < 0 || (starts_upper && length <= 2))
     {
         strcat(output, word);
-        return;
+        return 0;
     }
 
     if (starts_upper)
         add_char(output, SHIFT_CHAR);
 
     add_char(output, (char)symbol);
+
+    return 1;
 }
 
 /**
  * Compresses a string node
  * @param element The node containing the string to be compressed
  * @param compresssed_element The node to hold the compressed string
+ * @param compressed Counter of the words replaced by a symbol
+ * @param not_found Counter of the words kept as they were
  */
-void compress_line(struct node *element, struct node *compressed_element)
+void compress_line(struct node *element, struct node *compressed_element, int *compressed, int *not_found)
 {
     int character;
     int word_length = 0;
@@ -340,13 +370,23 @@ void compress_line(struct node *element, struct node *compressed_element)
             continue;
         }
 
-        // Close the pending word, if any
-        flush_word(word, &word_length, compressed_element->data);
+        // Close the pending word, if any, and count it
+        int result = flush_word(word, &word_length, compressed_element->data);
+
+        if (result == 1)
+            (*compressed)++;
+        else if (result == 0)
+            (*not_found)++;
 
         // If we have a standalone character, just add it
         add_char(compressed_element->data, (char)character);
     }
 
-    // Close the word left at the end of the line
-    flush_word(word, &word_length, compressed_element->data);
+    // Close the word left at the end of the line and count it
+    int result = flush_word(word, &word_length, compressed_element->data);
+
+    if (result == 1)
+        (*compressed)++;
+    else if (result == 0)
+        (*not_found)++;
 }
