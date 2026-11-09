@@ -146,7 +146,7 @@ void *reader(void *arg)
     SharedQueue *queue = (SharedQueue *)reader_structure->queue;
 
     // Try to open the file
-    FILE *file = fopen(reader_structure->filepath, "r");
+    FILE *file = fopen(reader_structure->filepath, "rb");
 
     // Check for failure
     if (file == NULL)

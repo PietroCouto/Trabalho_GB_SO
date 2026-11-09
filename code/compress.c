@@ -253,7 +253,7 @@ void *writer(void *arg)
     SharedQueue *queue = writer_structure->queue;
 
     // Try to open the output file
-    FILE *file = fopen(writer_structure->filepath, "w");
+    FILE *file = fopen(writer_structure->filepath, "wb");
 
     // Check for failure to open the output file
     if (file == NULL)
