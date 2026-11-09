@@ -2,6 +2,9 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#ifndef STATS_H
+#define STATS_H
+
 // Struct with all types of stats
 typedef struct
 {
@@ -52,6 +55,11 @@ void show_decompressed_stats(Stats *stats)
     printf("Palavras restauradas: %ld\n", stats->restored);
 }
 
+/**
+ * Updates the read_bytes stats
+ * @param stats The stats structure to be updated
+ * @param line The string to count the bytes from
+ */
 void update_read_data(Stats *stats, char *line)
 {
     pthread_mutex_lock(&stats->mutex);
@@ -59,6 +67,12 @@ void update_read_data(Stats *stats, char *line)
     pthread_mutex_unlock(&stats->mutex);
 }
 
+/**
+ * Updates the compressed and not found words
+ * @param stats The stats structure to be updated
+ * @param compressed The total compressed words
+ * @param not_found The total not found words
+ */
 void update_compressed_data(Stats *stats, int compressed, int not_found)
 {
     pthread_mutex_lock(&stats->mutex);
@@ -67,6 +81,11 @@ void update_compressed_data(Stats *stats, int compressed, int not_found)
     pthread_mutex_unlock(&stats->mutex);
 }
 
+/**
+ * Updates the write bytes
+ * @param stats The stats structure to be updated
+ * @param data The string to count the bytes from
+ */
 void update_write_data(Stats *stats, char *data)
 {
     pthread_mutex_lock(&stats->mutex);
@@ -75,3 +94,5 @@ void update_write_data(Stats *stats, char *data)
 
     send_stats(stats);
 }
+
+#endif
