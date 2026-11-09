@@ -2,14 +2,20 @@
  * @authors Pietro do Couto Freitas, Luiz Sergio Chisté Fogaça e Vitor Martins de Souza
  */
 
+/**
+ * Libraries
+ */
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/wait.h>
-#include <stdbool.h>
 
+/**
+ * Handmade Libraries
+ */
 #include "libs/utils.h"
+#include "libs/stats.h"
 
 /**
  * Prototypes
@@ -17,6 +23,7 @@
 int start_compress(char *input_path, char *output_path, int (*pipe_fd)[2]);
 int start_decompress(char *input_path, char *output_path, int (*pipe_fd)[2]);
 void print_file(char *title, char *path);
+void show_report(char *mode, Stats *stats, char *input_path, char *output_path);
 
 /**
  * Main function
@@ -43,33 +50,16 @@ int main(int argc, char *argv[])
     int pipe_fd[2];
 
     if (pipe(pipe_fd) < 0)
-        exit(1);
+        return return_error("Falha ao criar o pipe do monitor!");
 
-    // Check if compress mode was selected
-    if (strcmp(argv[1], "compress") == 0)
-    {
-        // Try to start the compressing process
-        child_pid = start_compress(argv[2], argv[3], &pipe_fd);
+    // Try to start the compressing process
+    child_pid = strcmp(argv[1], "compress") == 0 ? start_compress(argv[2], argv[3], &pipe_fd) : start_decompress(argv[2], argv[3], &pipe_fd);
 
-        // Check if the startup was successful
-        if (child_pid == -1)
-            return return_error("Erro ao inicializar o compactador!");
+    // Check if the startup was successful
+    if (child_pid == -1)
+        return return_error("Erro ao inicializar o processo!");
 
-        printf("Compactador inicializado! PID %i\n", child_pid);
-    }
-
-    // Check if decompress mode was selected
-    if (strcmp(argv[1], "decompress") == 0)
-    {
-        // Try to start the decompressing process
-        child_pid = start_decompress(argv[2], argv[3], &pipe_fd);
-
-        // Check if the startup was successful
-        if (child_pid == -1)
-            return return_error("Erro ao inicializar o descompactador!");
-
-        printf("Descompactador inicializado! PID %i\n", child_pid);
-    }
+    printf("Processo inicializado! PID %i\n\n", child_pid);
 
     close(pipe_fd[1]);
 
@@ -110,30 +100,7 @@ int main(int argc, char *argv[])
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
         return return_error("O processo terminou com erro!");
 
-    // Show the final report
-    if (strcmp(argv[1], "compress") == 0)
-    {
-        printf("Palavras totais: %ld\n", stats.compressed + stats.not_found);
-        printf("Palavras compactadas: %ld\n", stats.compressed);
-        printf("Palavras fora do dicionário: %ld\n", stats.not_found);
-        printf("Tamanho original: %ld bytes\n", stats.read_bytes);
-        printf("Tamanho compactado: %ld bytes\n", stats.write_bytes);
-
-        if (stats.read_bytes > 0)
-            printf("Compressão: %.2f%%\n", 100.0 * (stats.read_bytes - stats.write_bytes) / stats.read_bytes);
-
-        print_file("Conteúdo original", argv[2]);
-        print_file("Arquivo compactado", argv[3]);
-    }
-    else
-    {
-        printf("Tamanho compactado: %ld bytes\n", stats.read_bytes);
-        printf("Tamanho descompactado: %ld bytes\n", stats.write_bytes);
-        printf("Palavras restauradas: %ld\n", stats.restored);
-
-        print_file("Arquivo compactado", argv[2]);
-        print_file("Arquivo descompactado", argv[3]);
-    }
+    show_report(argv[1], &stats, argv[2], argv[3]);
 
     return 0;
 }
@@ -191,7 +158,7 @@ int start_compress(char *input_path, char *output_path, int (*pipe_fd)[2])
 
     // Try to replace the child code
     if (pid == 0)
-    { 
+    {
         // Close the children pipe stdin
         close((*pipe_fd)[0]);
 
@@ -255,3 +222,28 @@ int start_decompress(char *input_path, char *output_path, int (*pipe_fd)[2])
 
     return pid;
 };
+
+/**
+ * Displays the final report
+ * @param mode The execution mode
+ * @param stats The stats structure
+ * @param input_path The input file path
+ * @param output_path The output file path
+ */
+void show_report(char *mode, Stats *stats, char *input_path, char *output_path)
+{
+    if (strcmp(mode, "compress") == 0)
+    {
+        show_compressed_stats(stats);
+
+        print_file("Conteúdo original", input_path);
+        print_file("Arquivo compactado", output_path);
+
+        return;
+    }
+
+    show_decompressed_stats(stats);
+
+    print_file("Arquivo compactado", input_path);
+    print_file("Arquivo descompactado", output_path);
+}

@@ -2,9 +2,11 @@
  * @authors Pietro do Couto Freitas, Luiz Sergio Chisté Fogaça e Vitor Martins de Souza
  */
 
+/**
+ * Libraries
+ */
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 /**
  * Handmade Libraries
@@ -43,6 +45,9 @@ typedef struct
     char *filepath;
 } WriterStructure;
 
+/**
+ * Prototypes
+ */
 void startup_structures(ReaderStructure *reader_structure, DecompressorStructure *compressor_structure, WriterStructure *writer_structure, char *input_path, char *output_path);
 static void *writer(void *arg);
 static void *decompressor(void *arg);
@@ -258,21 +263,32 @@ void *writer(void *arg)
     return NULL;
 }
 
+/**
+ * Decompresses a line and writes it to the decompressed element
+ * @param element The element containing the line to be decompressed
+ * @param decompressed_element The element to hold the decompressed data
+ */
 void decompress_line(struct node *element, struct node *decompressed_element)
 {
     int character;
 
-    // Garante que a string de destino inicia vazia
+    // Clear the destination string
     decompressed_element->data[0] = '\0';
 
-    // Percorre a linha comprimida caractere por caractere
+    // Iterate the compressed line
     for (int i = 0; (character = element->data[i]) != '\0'; i++)
     {
-        char *word = sym_to_word(character); // Tenta achar palavra correspondente
+        // Try to translate the symbol
+        char *word = sym_to_word(character);
 
+        // If it was a dictionary hit
         if (word)
-            strcat(decompressed_element->data, word); // Concatena a palavra traduzida
-        else
-            add_char(decompressed_element->data, character); // Anexa o caractere normal/pontuação
+        {
+            strcat(decompressed_element->data, word);
+            continue;
+        }
+
+        // If it was a miss
+        add_char(decompressed_element->data, character);
     }
 }

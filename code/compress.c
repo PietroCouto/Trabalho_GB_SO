@@ -9,7 +9,6 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include <ctype.h>
 
 /**
@@ -18,6 +17,7 @@
 #include "libs/dictionary.h"
 #include "libs/utils.h"
 #include "libs/queue.h"
+#include "libs/stats.h"
 
 /**
  * ReaderStructure
@@ -60,8 +60,7 @@ void startup_structures(ReaderStructure *reader_structure, CompressorStructure *
 void compress_line(struct node *element, struct node *compressed_element, int *compressed, int *not_found);
 static int flush_word(char *word, int *word_length, char *output);
 
-static Stats stats = {0}; //Total process
-static pthread_mutex_t stats_mutex = PTHREAD_MUTEX_INITIALIZER;
+static Stats stats = {0};
 
 /**
  * Compresses a file
@@ -182,9 +181,7 @@ void *reader(void *arg)
         insert_element(queue, element);
 
         // Update the shared stats
-        pthread_mutex_lock(&stats_mutex);
-        stats.read_bytes += strlen(line);
-        pthread_mutex_unlock(&stats_mutex);
+        update_read_data(&stats, line);
     }
 
     // Finishes the reader queue
@@ -232,10 +229,7 @@ void *compressor(void *arg)
         insert_element(compressor_queue, compressed_element);
 
         // Update the shared stats
-        pthread_mutex_lock(&stats_mutex);
-        stats.compressed += compressed;
-        stats.not_found += not_found;
-        pthread_mutex_unlock(&stats_mutex);
+        update_compressed_data(&stats, compressed, not_found);
 
         // Free the element memory
         free(element);
@@ -281,10 +275,7 @@ void *writer(void *arg)
         fflush(file);
 
         // Update the shared stats and send a snapshot to the Monitor
-        pthread_mutex_lock(&stats_mutex);
-        stats.write_bytes += strlen(element->data);
-        send_stats(&stats);
-        pthread_mutex_unlock(&stats_mutex);
+        update_write_data(&stats, element->data);
 
         // Free the element memory
         free(element);
@@ -294,15 +285,16 @@ void *writer(void *arg)
     fclose(file);
 
     // Send the final totals
-    pthread_mutex_lock(&stats_mutex);
     send_stats(&stats);
-    pthread_mutex_unlock(&stats_mutex);
 
     return NULL;
 }
 
 /**
  * Closes the pending word and writes it (or its symbol) to the output
+ * @param word The word to be flushed
+ * @param word_length The length of the word
+ * @param output The output string to concatenate to
  * @returns -1 if there was no word, 0 if the word was kept as is, 1 if it became a symbol
  */
 static int flush_word(char *word, int *word_length, char *output)
@@ -373,9 +365,10 @@ void compress_line(struct node *element, struct node *compressed_element, int *c
         // Close the pending word, if any, and count it
         int result = flush_word(word, &word_length, compressed_element->data);
 
-        if (result == 1)
+        if (result)
             (*compressed)++;
-        else if (result == 0)
+
+        if (result == 0)
             (*not_found)++;
 
         // If we have a standalone character, just add it
@@ -385,8 +378,9 @@ void compress_line(struct node *element, struct node *compressed_element, int *c
     // Close the word left at the end of the line and count it
     int result = flush_word(word, &word_length, compressed_element->data);
 
-    if (result == 1)
+    if (result)
         (*compressed)++;
-    else if (result == 0)
+
+    if (result == 0)
         (*not_found)++;
 }
