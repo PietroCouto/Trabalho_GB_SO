@@ -306,6 +306,15 @@ static int flush_word(char *word, int *word_length, char *output)
     int length = *word_length;
     *word_length = 0;
 
+    // Exact match first (e.g. "O"), it is already 1 byte so no SHIFT_CHAR is needed
+    int exact = word_to_sym(word);
+
+    if (exact >= 0)
+    {
+        add_char(output, (char)exact);
+        return 1;
+    }
+
     char lower[256];
     int starts_upper = isupper((unsigned char)word[0]);
     int reversible = 1;
@@ -365,7 +374,8 @@ void compress_line(struct node *element, struct node *compressed_element, int *c
         // Close the pending word, if any, and count it
         int result = flush_word(word, &word_length, compressed_element->data);
 
-        if (result)
+        // -1 means there was no word, so only 1 is a compressed word
+        if (result == 1)
             (*compressed)++;
 
         if (result == 0)
@@ -378,7 +388,7 @@ void compress_line(struct node *element, struct node *compressed_element, int *c
     // Close the word left at the end of the line and count it
     int result = flush_word(word, &word_length, compressed_element->data);
 
-    if (result)
+    if (result == 1)
         (*compressed)++;
 
     if (result == 0)

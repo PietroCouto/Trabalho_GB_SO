@@ -11,7 +11,7 @@
  */
 static const unsigned char SYM[] = {
     0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2D,
-    0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A,
+    0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0xE3,
     0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x42, 0x43, 0x44, 0x46, 0x47, 0x48,
     0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55,
     0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x62,
@@ -31,7 +31,7 @@ static const unsigned char SYM[] = {
  * The dictionary
  */
 static const char *WORD[] =
-    {"a", "e", "o", "A", "E", "O", "de", "em", "as", "ao", "se", "no", "um", "ou",
+    {"a", "c", "e", "o", "A", "E", "O", "de", "em", "as", "ao", "se", "no", "um", "ou",
      "os", "da", "do", "com", "nao", "por", "uma", "que", "foi", "tem", "ler", "faz",
      "uso", "ver", "pai", "ser", "mas", "ele", "ate", "mais", "como", "para", "este",
      "pode", "foco", "aqui", "taxa", "modo", "isso", "util", "seja", "deve", "duas",
@@ -48,7 +48,7 @@ static const char *WORD[] =
      "tamanho", "comprova", "programa", "arquivos", "palavras", "objetivo", "material",
      "possivel", "processo", "aparecem", "original", "tecnicos", "continua", "observar",
      "entender", "bastante", "escrever", "pensamos", "encontra", "encontre", "concluir",
-     "bastante", "trabalha", "eficiente", "demonstra", "relatorio", "processos", "atividade",
+     "trabalha", "eficiente", "demonstra", "relatorio", "processos", "atividade",
      "preservar", "repetidas", "diferenca", "portugues", "trabalhar", "estimular", "pontuacao",
      "contextos", "preparado", "trabalham", "comprimir", "estruturas", "paragrafos",
      "escolhemos", "diferentes", "repeticoes", "frequentes", "exatamente", "academicos",
@@ -77,17 +77,13 @@ static int word_to_sym(const char *word)
 /**
  * Converts symbols to words
  * @param symbol Integer representing the symbol to translate
- * @returns NULL for no match, WORD for match
+ * @returns NULL for no match, WORD for match (points to the dictionary, do not free)
  */
-static char *sym_to_word(int symbol)
+static const char *sym_to_word(int symbol)
 {
     for (int i = 0; i < DICTIONARY_SIZE; i++)
         if (SYM[i] == (unsigned char)symbol)
-        {
-            char *word = calloc(1, sizeof(WORD[i]));
-            strcpy(word, WORD[i]);
-            return word;
-        }
+            return WORD[i];
 
     return NULL;
 }

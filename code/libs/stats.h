@@ -82,6 +82,18 @@ void update_compressed_data(Stats *stats, int compressed, int not_found)
 }
 
 /**
+ * Updates the restored words
+ * @param stats The stats structure to be updated
+ * @param restored The total restored words
+ */
+void update_restored_data(Stats *stats, int restored)
+{
+    pthread_mutex_lock(&stats->mutex);
+    stats->restored += restored;
+    pthread_mutex_unlock(&stats->mutex);
+}
+
+/**
  * Updates the write bytes
  * @param stats The stats structure to be updated
  * @param data The string to count the bytes from

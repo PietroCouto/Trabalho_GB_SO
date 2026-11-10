@@ -7,6 +7,8 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
 /**
  * Handmade Libraries
@@ -14,6 +16,7 @@
 #include "libs/dictionary.h"
 #include "libs/utils.h"
 #include "libs/queue.h"
+#include "libs/stats.h"
 
 /**
  * ReaderStructure
@@ -52,7 +55,12 @@ void startup_structures(ReaderStructure *reader_structure, DecompressorStructure
 static void *writer(void *arg);
 static void *decompressor(void *arg);
 static void *reader(void *arg);
-void decompress_line(struct node *element, struct node *decompressed_element);
+void decompress_line(struct node *element, struct node *decompressed_element, int *restored);
+
+static Stats stats = {0};
+
+// Control char flag, kept between lines (only the decompressor thread uses it)
+static int shift_next = 0;
 
 /**
  * Main function
@@ -169,6 +177,9 @@ void *reader(void *arg)
         strcpy(element->data, line);
 
         insert_element(queue, element);
+
+        // Update the shared stats
+        update_read_data(&stats, line);
     }
 
     // Finishes the reader queue
@@ -201,11 +212,17 @@ static void *decompressor(void *arg)
         // Create the node to hold the compressed data
         struct node *decompressed_element = calloc(1, sizeof(struct node));
 
-        // Compress the element line
-        decompress_line(element, decompressed_element);
+        // Words of this line that were restored from a symbol
+        int restored = 0;
 
-        // Insert the compressed line into the queue
+        // Decompress the element line
+        decompress_line(element, decompressed_element, &restored);
+
+        // Insert the decompressed line into the queue
         insert_element(decompressor_queue, decompressed_element);
+
+        // Update the shared stats
+        update_restored_data(&stats, restored);
 
         // Free the element memory
         free(element);
@@ -253,12 +270,18 @@ void *writer(void *arg)
         // Flush the file to force fprintf to write
         fflush(file);
 
+        // Update the shared stats and send a snapshot to the Monitor
+        update_write_data(&stats, element->data);
+
         // Free the element memory
         free(element);
     }
 
     // Close the output file
     fclose(file);
+
+    // Send the final totals
+    send_stats(&stats);
 
     return NULL;
 }
@@ -267,8 +290,9 @@ void *writer(void *arg)
  * Decompresses a line and writes it to the decompressed element
  * @param element The element containing the line to be decompressed
  * @param decompressed_element The element to hold the decompressed data
+ * @param restored Counter of the words restored from a symbol
  */
-void decompress_line(struct node *element, struct node *decompressed_element)
+void decompress_line(struct node *element, struct node *decompressed_element, int *restored)
 {
     int character;
 
@@ -278,13 +302,28 @@ void decompress_line(struct node *element, struct node *decompressed_element)
     // Iterate the compressed line
     for (int i = 0; (character = element->data[i]) != '\0'; i++)
     {
+        // The next word must start with uppercase
+        if (character == SHIFT_CHAR)
+        {
+            shift_next = 1;
+            continue;
+        }
+
         // Try to translate the symbol
-        char *word = sym_to_word(character);
+        const char *word = sym_to_word(character);
 
         // If it was a dictionary hit
         if (word)
         {
+            int start = strlen(decompressed_element->data);
+
             strcat(decompressed_element->data, word);
+
+            if (shift_next)
+                decompressed_element->data[start] = toupper((unsigned char)decompressed_element->data[start]);
+
+            shift_next = 0;
+            (*restored)++;
             continue;
         }
 
